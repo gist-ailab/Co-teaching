@@ -24,7 +24,7 @@ parser.add_argument('--noise_type', type = str, help='[pairflip, symmetric]', de
 parser.add_argument('--num_gradual', type = int, default = 10, help='how many epochs for linear drop rate, can be 5, 10, 15. This parameter is equal to Tk for R(T) in Co-teaching paper.')
 parser.add_argument('--exponent', type = float, default = 1, help='exponent of the forget rate, can be 0.5, 1, 2. This parameter is equal to c in Tc for R(T) in Co-teaching paper.')
 parser.add_argument('--top_bn', action='store_true')
-parser.add_argument('--dataset', type = str, help = 'mnist, cifar10, or cifar100', default = 'mnist')
+parser.add_argument('--dataset', type = str, help = 'mnist, cifar10, or cifar100', default = 'cifar10')
 parser.add_argument('--n_epoch', type=int, default=200)
 parser.add_argument('--seed', type=int, default=1)
 parser.add_argument('--print_freq', type=int, default=50)
@@ -71,7 +71,7 @@ if args.dataset=='cifar10':
     args.top_bn = False
     args.epoch_decay_start = 80
     args.n_epoch = 200
-    train_dataset = CIFAR10(root='./data/',
+    train_dataset = CIFAR10(root='/SSDc/yyg/cifar10/',
                                 download=True,  
                                 train=True, 
                                 transform=transforms.ToTensor(),
@@ -79,7 +79,7 @@ if args.dataset=='cifar10':
                                 noise_rate=args.noise_rate
                            )
     
-    test_dataset = CIFAR10(root='./data/',
+    test_dataset = CIFAR10(root='/SSDc/yyg/cifar10/',
                                 download=True,  
                                 train=False, 
                                 transform=transforms.ToTensor(),
@@ -93,7 +93,7 @@ if args.dataset=='cifar100':
     args.top_bn = False
     args.epoch_decay_start = 100
     args.n_epoch = 200
-    train_dataset = CIFAR100(root='./data/',
+    train_dataset = CIFAR100(root='/SSDc/yyg/cifar100/',
                                 download=True,  
                                 train=True, 
                                 transform=transforms.ToTensor(),
@@ -101,7 +101,7 @@ if args.dataset=='cifar100':
                                 noise_rate=args.noise_rate
                             )
     
-    test_dataset = CIFAR100(root='./data/',
+    test_dataset = CIFAR100(root='/SSDc/yyg/cifar100/',
                                 download=True,  
                                 train=False, 
                                 transform=transforms.ToTensor(),
@@ -115,6 +115,7 @@ else:
     forget_rate=args.forget_rate
 
 noise_or_not = train_dataset.noise_or_not
+noise_or_not = torch.tensor(noise_or_not).cuda()
 
 # Adjust learning rate and betas for Adam Optimizer
 mom1 = 0.9
@@ -159,13 +160,13 @@ def accuracy(logit, target, topk=(1,)):
 
     res = []
     for k in topk:
-        correct_k = correct[:k].view(-1).float().sum(0, keepdim=True)
+        correct_k = correct[:k].reshape(-1).float().sum(0, keepdim=True)
         res.append(correct_k.mul_(100.0 / batch_size))
     return res
 
 # Train the Model
 def train(train_loader,epoch, model1, optimizer1, model2, optimizer2):
-    print 'Training %s...' % model_str
+    print('Training %s...' % model_str)
     pure_ratio_list=[]
     pure_ratio_1_list=[]
     pure_ratio_2_list=[]
@@ -176,7 +177,7 @@ def train(train_loader,epoch, model1, optimizer1, model2, optimizer2):
     train_correct2=0 
 
     for i, (images, labels, indexes) in enumerate(train_loader):
-        ind=indexes.cpu().numpy().transpose()
+        ind=indexes.T
         if i>args.num_iter_per_epoch:
             break
       
@@ -203,9 +204,22 @@ def train(train_loader,epoch, model1, optimizer1, model2, optimizer2):
         optimizer2.zero_grad()
         loss_2.backward()
         optimizer2.step()
+
+        # print(loss_1.d)
         if (i+1) % args.print_freq == 0:
             print ('Epoch [%d/%d], Iter [%d/%d] Training Accuracy1: %.4F, Training Accuracy2: %.4f, Loss1: %.4f, Loss2: %.4f, Pure Ratio1: %.4f, Pure Ratio2 %.4f' 
-                  %(epoch+1, args.n_epoch, i+1, len(train_dataset)//batch_size, prec1, prec2, loss_1.data[0], loss_2.data[0], np.sum(pure_ratio_1_list)/len(pure_ratio_1_list), np.sum(pure_ratio_2_list)/len(pure_ratio_2_list)))
+                  %(
+                    epoch+1, 
+                    args.n_epoch, 
+                    i+1, 
+                    len(train_dataset)//batch_size, 
+                    prec1, 
+                    prec2, 
+                    loss_1.item(), 
+                    loss_2.item(), 
+                    (np.sum(pure_ratio_1_list)/len(pure_ratio_1_list)), 
+                    (np.sum(pure_ratio_2_list)/len(pure_ratio_2_list)))
+                  )
 
     train_acc1=float(train_correct)/float(train_total)
     train_acc2=float(train_correct2)/float(train_total2)
@@ -213,7 +227,7 @@ def train(train_loader,epoch, model1, optimizer1, model2, optimizer2):
 
 # Evaluate the Model
 def evaluate(test_loader, model1, model2):
-    print 'Evaluating %s...' % model_str
+    print('Evaluating %s...' % model_str)
     model1.eval()    # Change model to 'eval' mode.
     correct1 = 0
     total1 = 0
@@ -243,7 +257,7 @@ def evaluate(test_loader, model1, model2):
 
 def main():
     # Data Loader (Input Pipeline)
-    print 'loading dataset...'
+    print('loading dataset...')
     train_loader = torch.utils.data.DataLoader(dataset=train_dataset,
                                                batch_size=batch_size, 
                                                num_workers=args.num_workers,
@@ -256,15 +270,15 @@ def main():
                                               drop_last=True,
                                               shuffle=False)
     # Define models
-    print 'building model...'
+    print('building model...')
     cnn1 = CNN(input_channel=input_channel, n_outputs=num_classes)
     cnn1.cuda()
-    print cnn1.parameters
+    print(cnn1.parameters)
     optimizer1 = torch.optim.Adam(cnn1.parameters(), lr=learning_rate)
     
     cnn2 = CNN(input_channel=input_channel, n_outputs=num_classes)
     cnn2.cuda()
-    print cnn2.parameters
+    print(cnn2.parameters)
     optimizer2 = torch.optim.Adam(cnn2.parameters(), lr=learning_rate)
 
     mean_pure_ratio1=0
